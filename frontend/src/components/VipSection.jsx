@@ -88,6 +88,15 @@ export default function VipSection({ userId, name }) {
         </div>
       )}
 
+      {v.private_photos?.length > 0 && (
+        <div data-testid="vip-view-private-photos">
+          <div className="text-sm font-semibold text-rose-200 mb-2 flex items-center gap-1.5"><Lock size={14} className="text-rose-300" /> {t("vip_private_photos", lang)}</div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+            {v.private_photos.map((p) => <img key={p} src={fileUrl(p)} alt="" className="w-full aspect-square object-cover rounded-lg border border-rose-500/40" />)}
+          </div>
+        </div>
+      )}
+
       {v.services?.length > 0 && (
         <div className="flex flex-wrap gap-2" data-testid="vip-services">
           {v.services.map((s) => <span key={s} className="text-xs px-2.5 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-200">{svcLabel(s, lang)}</span>)}
@@ -124,7 +133,7 @@ export default function VipSection({ userId, name }) {
 
       <Dialog open={!!slot} onOpenChange={(o) => { if (!o) { setSlot(null); setPlace(null); setLoc({}); } }}>
         <DialogContent className="bg-[#161018] border-white/10 text-white max-w-sm max-h-[85vh] overflow-y-auto" data-testid="vip-book-dialog">
-          <DialogHeader><DialogTitle className="font-serif-luxe text-xl">{name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-serif-luxe text-xl">{data.name || name}</DialogTitle></DialogHeader>
           {slot && <p className="text-sm text-slate-400"><Calendar size={13} className="inline me-1 -mt-0.5" />{slot.date} · {slot.from}–{slot.to}</p>}
 
           {hasPlaces && (

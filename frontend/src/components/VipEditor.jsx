@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Crown, Plus, X, Sparkles } from "lucide-react";
+import { Crown, Plus, X, Sparkles, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { api, fileUrl } from "../lib/api";
@@ -23,20 +23,28 @@ export default function VipEditor() {
   const [slots, setSlots] = useState(v.availability || []);
   const [ns, setNs] = useState({ date: "", from: "18:00", to: "23:00" });
   const [photos, setPhotos] = useState(v.photos || []);
+  const [privatePhotos, setPrivatePhotos] = useState(v.private_photos || []);
+  const [nickname, setNickname] = useState(v.nickname || "");
+  const [postMode, setPostMode] = useState(v.post_mode === "separate" ? "separate" : "together");
   const [published, setPublished] = useState(v.published !== false);
   const [busy, setBusy] = useState(false);
   const photoRef = React.useRef(null);
+  const privateRef = React.useRef(null);
   const goBuyVip = () => { toast.info(t("vip_upsell", lang)); nav("/wallet?vip=1"); };
-  const addPhoto = async (e) => {
+  const addPhoto = async (e, isPrivate = false) => {
     const f = e.target.files?.[0]; if (!f) return;
-    if (photos.length >= 12) { toast.error(t("vip_max_photos", lang)); return; }
+    const list = isPrivate ? privatePhotos : photos;
+    if (list.length >= 12) { toast.error(t("vip_max_photos", lang)); return; }
     const fd = new FormData(); fd.append("photo", f);
-    try { const { data } = await api.post("/vip/photo", fd); setPhotos(data.photos); }
+    try {
+      const { data } = await api.post(`/vip/photo?private=${isPrivate}`, fd);
+      setPhotos(data.photos); setPrivatePhotos(data.private_photos);
+    }
     catch (er) { toast.error(er.response?.data?.detail === "MAX_PHOTOS" ? t("vip_max_photos", lang) : "Ошибка"); }
-    finally { if (photoRef.current) photoRef.current.value = ""; }
+    finally { const ref = isPrivate ? privateRef : photoRef; if (ref.current) ref.current.value = ""; }
   };
-  const delPhoto = async (p) => {
-    try { const { data } = await api.delete(`/vip/photo?path=${encodeURIComponent(p)}`); setPhotos(data.photos); } catch { toast.error("Ошибка"); }
+  const delPhoto = async (p, isPrivate = false) => {
+    try { const { data } = await api.delete(`/vip/photo?path=${encodeURIComponent(p)}&private=${isPrivate}`); setPhotos(data.photos); setPrivatePhotos(data.private_photos); } catch { toast.error("Ошибка"); }
   };
   const makeCover = async (p) => {
     const reordered = [p, ...photos.filter((x) => x !== p)];
@@ -60,6 +68,7 @@ export default function VipEditor() {
         services, places, client_wants: wants,
         price_hour: Number(prices.hour) || 0, price_2h: Number(prices.h2) || 0, price_3h: Number(prices.h3) || 0,
         availability: slots, published: isVip ? published : false,
+        nickname, post_mode: postMode,
       });
       await refreshUser();
       toast.success(t("vip_saved_toast", lang));
@@ -87,21 +96,58 @@ export default function VipEditor() {
       <h2 className="font-serif-luxe text-2xl gold-text flex items-center gap-2"><Crown size={22} className="text-amber-300" /> {t("vip_editor_title", lang)}</h2>
       <p className="text-xs text-slate-400">{t("vip_editor_note", lang)}</p>
 
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label className="text-sm font-semibold text-amber-200">{t("vip_nickname", lang)}</label>
+          <Input data-testid="vip-nickname-input" value={nickname} maxLength={40} onChange={(e) => setNickname(e.target.value)} placeholder={t("vip_nickname_ph", lang)} className="bg-white/5 border-white/10 mt-1" />
+          <p className="text-[11px] text-slate-500 mt-1 flex items-start gap-1"><Lock size={11} className="mt-0.5 shrink-0 text-amber-300" /> {t("vip_nickname_note", lang)}</p>
+        </div>
+        <div>
+          <label className="text-sm font-semibold text-amber-200">{t("vip_post_mode", lang)}</label>
+          <div className="mt-1 grid grid-cols-2 gap-2" data-testid="vip-post-mode">
+            {[{ v: "together", l: "vip_post_together" }, { v: "separate", l: "vip_post_separate" }].map((o) => (
+              <button key={o.v} type="button" data-testid={`vip-post-mode-${o.v}`} onClick={() => setPostMode(o.v)}
+                className={`text-xs px-3 py-2 rounded-lg border transition-colors ${postMode === o.v ? "bg-amber-500/20 border-amber-500/50 text-amber-200" : "bg-white/5 border-white/10 text-slate-300 hover:bg-white/10"}`}>{t(o.l, lang)}</button>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">{t("vip_post_mode_note", lang)}</p>
+        </div>
+      </div>
+
       <div data-testid="vip-photos">
-        <div className="text-sm font-semibold text-amber-200 mb-2">{t("vip_photos", lang)}</div>
+        <div className="text-sm font-semibold text-amber-200 mb-2">{t("vip_public_photos", lang)}</div>
         <div className="flex flex-wrap gap-2">
           {photos.map((p, i) => (
             <div key={p} className="relative w-20 h-20 rounded-lg overflow-hidden gold-hairline group">
               <img src={fileUrl(p)} alt="" className="w-full h-full object-cover" />
               {i === 0 && <span className="absolute bottom-0 left-0 right-0 bg-amber-500/80 text-[9px] text-black text-center">{t("vip_cover", lang)}</span>}
               {i !== 0 && <button data-testid="vip-photo-cover" onClick={() => makeCover(p)} className="absolute bottom-0 left-0 right-0 bg-black/70 text-[9px] text-amber-200 text-center opacity-0 group-hover:opacity-100">{t("vip_make_cover", lang)}</button>}
-              <button data-testid="vip-photo-del" onClick={() => delPhoto(p)} className="absolute top-0 right-0 bg-black/70 text-rose-300 p-0.5"><X size={12} /></button>
+              <button data-testid="vip-photo-del" onClick={() => delPhoto(p, false)} className="absolute top-0 right-0 bg-black/70 text-rose-300 p-0.5"><X size={12} /></button>
             </div>
           ))}
           {photos.length < 12 && (
             <>
-              <input ref={photoRef} data-testid="vip-photo-input" type="file" accept="image/*" onChange={addPhoto} className="hidden" id="vip-photo" />
+              <input ref={photoRef} data-testid="vip-photo-input" type="file" accept="image/*" onChange={(e) => addPhoto(e, false)} className="hidden" id="vip-photo" />
               <label htmlFor="vip-photo" className="w-20 h-20 rounded-lg border-2 border-dashed border-amber-400/50 flex items-center justify-center text-amber-300 cursor-pointer hover:bg-white/5"><Plus size={20} /></label>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div data-testid="vip-private-photos">
+        <div className="text-sm font-semibold text-rose-200 mb-1 flex items-center gap-1.5"><Lock size={14} className="text-rose-300" /> {t("vip_private_photos", lang)}</div>
+        <p className="text-[11px] text-slate-500 mb-2">{t("vip_private_photos_note", lang)}</p>
+        <div className="flex flex-wrap gap-2">
+          {privatePhotos.map((p) => (
+            <div key={p} className="relative w-20 h-20 rounded-lg overflow-hidden border border-rose-500/40 group">
+              <img src={fileUrl(p)} alt="" className="w-full h-full object-cover" />
+              <button data-testid="vip-private-photo-del" onClick={() => delPhoto(p, true)} className="absolute top-0 right-0 bg-black/70 text-rose-300 p-0.5"><X size={12} /></button>
+            </div>
+          ))}
+          {privatePhotos.length < 12 && (
+            <>
+              <input ref={privateRef} data-testid="vip-private-photo-input" type="file" accept="image/*" onChange={(e) => addPhoto(e, true)} className="hidden" id="vip-private-photo" />
+              <label htmlFor="vip-private-photo" className="w-20 h-20 rounded-lg border-2 border-dashed border-rose-400/50 flex items-center justify-center text-rose-300 cursor-pointer hover:bg-white/5"><Plus size={20} /></label>
             </>
           )}
         </div>

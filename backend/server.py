@@ -1888,6 +1888,8 @@ class VipProfileReq(BaseModel):
     client_wants: str = ""
     availability: List[dict] = []
     published: bool = True
+    nickname: str = ""
+    post_mode: str = "together"  # "together" = attached to main profile | "separate" = standalone under nickname
 
 @api.get("/vip/catalog")
 async def vip_catalog(user=Depends(get_current_user)):
@@ -1905,14 +1907,18 @@ async def put_vip_profile(req: VipProfileReq, user=Depends(get_current_user)):
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) and re.fullmatch(r"\d{2}:\d{2}", f) and re.fullmatch(r"\d{2}:\d{2}", tt) and f < tt:
             slots.append({"date": d, "from": f, "to": tt})
     slots.sort(key=lambda x: (x["date"], x["from"]))
+    post_mode = req.post_mode if req.post_mode in ("together", "separate") else "together"
     vip = {"services": services,
            "prices": {"hour": max(0, req.price_hour), "h2": max(0, req.price_2h), "h3": max(0, req.price_3h), "night": max(0, req.price_night)},
            "places": places, "client_wants": (req.client_wants or "").strip()[:1000],
+           "nickname": (req.nickname or "").strip()[:40], "post_mode": post_mode,
            "availability": slots, "published": bool(req.published) and can_publish, "updated_at": datetime.now(timezone.utc).isoformat()}
     # preserve previously uploaded photos (managed by separate photo endpoints)
-    existing = await db.users.find_one({"id": user["id"]}, {"_id": 0, "vip.photos": 1})
+    existing = await db.users.find_one({"id": user["id"]}, {"_id": 0, "vip.photos": 1, "vip.private_photos": 1})
     if existing and existing.get("vip", {}).get("photos"):
         vip["photos"] = existing["vip"]["photos"]
+    if existing and existing.get("vip", {}).get("private_photos"):
+        vip["private_photos"] = existing["vip"]["private_photos"]
     await db.users.update_one({"id": user["id"]}, {"$set": {"vip": vip}})
     return {"saved": True, "vip": vip, "can_publish": can_publish}
 
@@ -1925,10 +1931,19 @@ async def get_vip_profile(uid: str, user=Depends(get_current_user)):
     # Unpublished VIP profiles are only visible to their owner
     if owner["vip"].get("published") is False and not is_owner:
         raise HTTPException(404, "No VIP profile")
+    vip = owner["vip"]
+    # When posted "separately", the VIP listing shows the nickname instead of the real name
+    separate = vip.get("post_mode") == "separate"
+    display_name = (vip.get("nickname") or "").strip() if separate else owner.get("name")
+    if not display_name:
+        display_name = vip.get("nickname") or owner.get("name")
     if is_owner or is_premium(user):
-        return {"locked": False, "user_id": uid, "name": owner.get("name"), "city": owner.get("city"), "vip": owner["vip"], "is_owner": is_owner}
-    _p = owner["vip"].get("photos") or []
-    return {"locked": True, "teaser_photo": _p[0] if _p else None, "services_count": len(owner["vip"].get("services") or [])}
+        return {"locked": False, "user_id": uid, "name": display_name, "real_name": owner.get("name"),
+                "nickname": vip.get("nickname") or "", "post_mode": vip.get("post_mode") or "together",
+                "city": owner.get("city"), "vip": vip, "is_owner": is_owner}
+    _p = vip.get("photos") or []
+    return {"locked": True, "teaser_photo": _p[0] if _p else None, "name": display_name if separate else None,
+            "post_mode": vip.get("post_mode") or "together", "services_count": len(vip.get("services") or [])}
 
 @api.post("/vip/book")
 async def vip_book(req: DateBookingReq, user=Depends(get_current_user)):
@@ -1993,11 +2008,12 @@ async def gift_premium(req: GiftPremiumReq, user=Depends(get_current_user)):
     return {"ok": True, "tier": tier}
 
 @api.post("/vip/photo")
-async def vip_add_photo(photo: UploadFile = File(...), user=Depends(get_current_user)):
+async def vip_add_photo(photo: UploadFile = File(...), private: bool = False, user=Depends(get_current_user)):
     # Uploading photos is part of filling in the VIP profile; publishing still requires a subscription
+    field = "private_photos" if private else "photos"
     u = await db.users.find_one({"id": user["id"]}, {"_id": 0, "vip": 1})
     vip = u.get("vip") or {}
-    photos = vip.get("photos") or []
+    photos = vip.get(field) or []
     if len(photos) >= 12:
         raise HTTPException(400, "MAX_PHOTOS")
     data = await photo.read()
@@ -2013,19 +2029,20 @@ async def vip_add_photo(photo: UploadFile = File(...), user=Depends(get_current_
                                "content_type": ct, "size": result["size"], "is_deleted": False, "private": False,
                                "created_at": datetime.now(timezone.utc).isoformat()})
     photos.append(result["path"])
-    vip["photos"] = photos
+    vip[field] = photos
     await db.users.update_one({"id": user["id"]}, {"$set": {"vip": vip}})
-    return {"photos": photos}
+    return {"photos": vip.get("photos") or [], "private_photos": vip.get("private_photos") or []}
 
 @api.delete("/vip/photo")
-async def vip_del_photo(path: str, user=Depends(get_current_user)):
+async def vip_del_photo(path: str, private: bool = False, user=Depends(get_current_user)):
+    field = "private_photos" if private else "photos"
     u = await db.users.find_one({"id": user["id"]}, {"_id": 0, "vip": 1})
     vip = u.get("vip") or {}
-    photos = [p for p in (vip.get("photos") or []) if p != path]
-    vip["photos"] = photos
+    photos = [p for p in (vip.get(field) or []) if p != path]
+    vip[field] = photos
     await db.users.update_one({"id": user["id"]}, {"$set": {"vip": vip}})
     await db.files.update_one({"storage_path": path}, {"$set": {"is_deleted": True}})
-    return {"photos": photos}
+    return {"photos": vip.get("photos") or [], "private_photos": vip.get("private_photos") or []}
 
 class VipPhotoOrderReq(BaseModel):
     photos: List[str]

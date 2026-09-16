@@ -163,7 +163,7 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: false
 
 test_plan:
@@ -209,6 +209,21 @@ agent_communication:
         -agent: "testing"
         -comment: "ALL 20 TESTS PASSED ✅. (1) Non-VIP user successfully saves VIP profile with PUT /api/vip/profile (200, not 403). Response includes can_publish=false, vip.published=false (forced off), prices.night=0 (defaults correctly), prices.hour=1000, h2=1800, h3=2500 all saved correctly. Services, places, availability all saved. (2) Non-VIP user uploads VIP photo via POST /api/vip/photo (200, not 403 VIP_REQUIRED). Photo uploaded successfully. (3) Second user GET /api/vip/profile/{uid} returns 404 'No VIP profile' for unpublished profile (correctly hidden). (4) Owner GET /api/vip/profile/{ownUserId} returns 200 with is_owner=true and full VIP data including published=false. All requirements verified and working correctly."
 
+  - task: "VIP profile extended fields (nickname, post_mode, private_photos)"
+    implemented: true
+    working: true
+    file: "server.py (PUT /api/vip/profile ~line 1898, GET /api/vip/profile/{uid} ~line 1925, POST/DELETE /api/vip/photo ~line 2010)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "user"
+        -comment: "Test newly extended VIP profile fields: (1) NICKNAME + POST_MODE persistence - nickname and post_mode fields saved, post_mode='separate' shows nickname as name (identity hidden), post_mode='together' shows real name, invalid post_mode defaults to 'together'. (2) PRIVATE PHOTOS - POST /api/vip/photo?private=true/false uploads to separate arrays (private_photos vs photos), DELETE with private param removes from correct array. (3) VISIBILITY - Premium users can see private_photos when viewing published VIP profiles, non-Premium users see locked profile without full vip data."
+        -working: true
+        -agent: "testing"
+        -comment: "ALL 44 TESTS PASSED ✅. FEATURE 1 (NICKNAME + POST_MODE): Non-VIP saves profile with nickname='Mila', post_mode='separate' - GET returns vip.nickname='Mila', vip.post_mode='separate', top-level nickname='Mila', post_mode='separate', name='Mila' (nickname shown, identity hidden), real_name=account name ✅. post_mode='together' - name equals real account name (not nickname) ✅. Invalid post_mode='foo' defaults to 'together' ✅. FEATURE 2 (PRIVATE PHOTOS): POST /api/vip/photo?private=true uploads to private_photos array (not photos) ✅. POST ?private=false uploads to photos array (not private_photos) ✅. Response contains BOTH arrays ✅. GET /api/vip/profile shows both arrays correctly ✅. DELETE ?private=true removes from private_photos only ✅. DELETE ?private=false removes from photos only ✅. Arrays are independent ✅. FEATURE 3 (VISIBILITY): Set user as VIP via MongoDB with timezone-aware datetime, re-login ✅. VIP user publishes profile (can_publish=true, published=true) ✅. Premium user GET returns 200, locked=false, vip.private_photos present with photos ✅. Non-Premium user GET returns 200, locked=true, no full vip data ✅. All requirements verified and working correctly."
+
 agent_communication:
     -agent: "main"
     -message: "Added 3-hour slot booking. Backend fully tested (6/6 pass). Frontend: DateBookingModal now shows 3h slot buttons with taken slots disabled; AvailabilityCalendar shows 3h section preview. Awaiting user consent for frontend UI testing."
@@ -216,3 +231,7 @@ agent_communication:
     -message: "Test the updated VIP profile behavior: Non-VIP users can now fill & save VIP profiles (but not publish), upload VIP photos, unpublished profiles hidden from others but visible to owner, price_night defaults to 0 when not provided."
     -agent: "testing"
     -message: "VIP profile behavior testing COMPLETE - ALL 20 TESTS PASSED ✅. Tested 4 main scenarios: (1) Non-VIP can save VIP profile with PUT /api/vip/profile - returns 200 (not 403), can_publish=false, published forced to false, price_night defaults to 0, all other prices saved correctly ✅. (2) Non-VIP can upload VIP photo via POST /api/vip/photo - returns 200 (not 403 VIP_REQUIRED), photo uploaded successfully ✅. (3) Unpublished profiles hidden from others - GET by another user returns 404 'No VIP profile' ✅. (4) Owner can view own unpublished profile - GET returns 200 with is_owner=true and full VIP data ✅. All requirements verified and working correctly. No issues found."
+    -agent: "user"
+    -message: "Test the newly extended VIP profile fields in the GiftsDates FastAPI backend. New features: (1) NICKNAME + POST_MODE persist - test nickname='Mila', post_mode='separate' (name should equal nickname, identity hidden), post_mode='together' (name should equal real account name), invalid post_mode='foo' should default to 'together'. (2) PRIVATE PHOTOS - POST /api/vip/photo?private=true/false should upload to separate arrays (private_photos vs photos), DELETE with private param should remove from correct array. (3) VISIBILITY of private photos to unlockers - Premium users should see private_photos when viewing published VIP profiles. Set vip_until/premium_until via MongoDB for testing."
+    -agent: "testing"
+    -message: "VIP profile extended fields testing COMPLETE - ALL 44 TESTS PASSED ✅. Created comprehensive test file backend_test_vip_extended.py covering 3 features. FEATURE 1 (15 tests): nickname and post_mode persistence working correctly - separate mode shows nickname as name (identity hidden), together mode shows real name, invalid mode defaults to together ✅. FEATURE 2 (17 tests): private photos functionality working correctly - private=true uploads to private_photos array, private=false uploads to photos array, both arrays independent, DELETE with private param removes from correct array ✅. FEATURE 3 (12 tests): visibility to premium unlockers working correctly - Premium users see private_photos in published VIP profiles (locked=false), non-Premium users see locked profile without full vip data ✅. IMPORTANT NOTE: When setting vip_until/premium_until via MongoDB for testing, must use timezone-aware datetime (datetime.now(timezone.utc)) otherwise is_vip() function's datetime comparison fails. All requirements verified and working correctly. No issues found."
