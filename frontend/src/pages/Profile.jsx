@@ -82,6 +82,7 @@ export default function Profile() {
             <Textarea data-testid="profile-bio-input" rows={4} value={f.bio || ""} onChange={e => setF({ ...f, bio: e.target.value })} className="bg-white/5 border-white/10 mt-1"/></div>
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
             <Label className="text-xs text-amber-300">{t("date_price", lang)}</Label>
+            <p className="text-[11px] text-slate-400 mt-0.5" data-testid="profile-date-price-note">{t("date_price_note", lang)}</p>
             <Input data-testid="profile-date-price-input" type="number" min={meta?.date_min_coins || 150} step="50" value={f.date_price || ""} placeholder={String(meta?.date_min_coins || 150)} onChange={e => setF({ ...f, date_price: e.target.value ? parseInt(e.target.value) : null })} className="bg-white/5 border-white/10 mt-1 font-mono-num"/>
             <p className="text-xs text-slate-400 mt-1">{t("date_price_hint", lang).replace("{n}", meta?.date_min_coins || 150)}</p>
           </div>
