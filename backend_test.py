@@ -1,298 +1,362 @@
 #!/usr/bin/env python3
 """
-Backend test for GiftsDates 3-hour date slot booking logic.
-Tests multiple non-overlapping bookings on the same day.
+Backend test for VIP profile behavior updates in GiftsDates app.
+Tests that non-VIP users can now fill & save VIP profiles (but not publish),
+upload VIP photos, and that unpublished profiles remain hidden from others.
 """
 import requests
 import json
+import random
+import io
 from datetime import datetime, timedelta
-from pymongo import MongoClient
-import os
-import sys
 
-# Load environment
-BASE_URL = "https://texture-vault-10.preview.emergentagent.com/api"
-MONGO_URL = "mongodb://localhost:27017"
-DB_NAME = "test_database"
+# Load backend URL from frontend/.env
+def get_backend_url():
+    with open('/app/frontend/.env', 'r') as f:
+        for line in f:
+            if line.startswith('REACT_APP_BACKEND_URL='):
+                return line.split('=', 1)[1].strip()
+    raise Exception("REACT_APP_BACKEND_URL not found in /app/frontend/.env")
 
-# Test data
-tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+BASE_URL = get_backend_url() + "/api"
+print(f"Testing against: {BASE_URL}")
 
-def print_section(title):
-    print(f"\n{'='*60}")
-    print(f"  {title}")
-    print(f"{'='*60}")
+# Test results tracking
+test_results = []
 
-def print_result(test_name, passed, details=""):
+def log_test(name, passed, details=""):
+    """Log test result"""
     status = "✅ PASS" if passed else "❌ FAIL"
-    print(f"{status} - {test_name}")
+    test_results.append({"name": name, "passed": passed, "details": details})
+    print(f"\n{status}: {name}")
     if details:
-        print(f"    {details}")
+        print(f"  Details: {details}")
 
-def register_user(email, name, password="TestPass123!"):
-    """Register a new user and return token and user_id"""
+def register_user(email_prefix):
+    """Register a new non-VIP user"""
+    timestamp = datetime.now().timestamp()
+    email = f"{email_prefix}.{int(timestamp)}.{random.randint(10000, 99999)}@example.com"
+    
     payload = {
         "email": email,
-        "password": password,
-        "name": name,
+        "password": "TestPass123!",
+        "name": f"Test User {email_prefix}",
         "age": 25,
         "gender": "female",
         "interested_in": "male",
-        "city": "New York",
-        "country": "USA"
+        "orientation": "straight",
+        "city": "Moscow",
+        "country": "Russia",
+        "bio": "Test user for VIP profile testing"
     }
-    resp = requests.post(f"{BASE_URL}/auth/register", json=payload)
-    if resp.status_code == 200:
-        data = resp.json()
-        return data["token"], data["user"]["id"]
-    else:
-        print(f"Registration failed for {email}: {resp.status_code} - {resp.text}")
-        return None, None
-
-def set_availability(token, availability_dates, availability_time):
-    """Set user's availability dates and time window"""
-    headers = {"Authorization": f"Bearer {token}"}
-    payload = {
-        "availability": availability_dates,
-        "availability_time": availability_time
+    
+    response = requests.post(f"{BASE_URL}/auth/register", json=payload)
+    
+    if response.status_code != 200:
+        raise Exception(f"Registration failed: {response.status_code} - {response.text}")
+    
+    data = response.json()
+    return {
+        "email": email,
+        "token": data["token"],
+        "user_id": data["user"]["id"],
+        "user": data["user"]
     }
-    resp = requests.patch(f"{BASE_URL}/auth/me", json=payload, headers=headers)
-    return resp.status_code == 200, resp
 
-def book_date(token, target_id, local_time, coins=150):
-    """Book a date at specific local time"""
+def get_vip_catalog(token):
+    """Get VIP services catalog"""
     headers = {"Authorization": f"Bearer {token}"}
-    scheduled_at = f"{tomorrow}T{local_time}:00Z"
-    payload = {
-        "target_id": target_id,
-        "venue": "Test Venue",
-        "city": "New York",
-        "scheduled_at": scheduled_at,
-        "coins": coins,
-        "local_time": local_time
-    }
-    resp = requests.post(f"{BASE_URL}/dates/book", json=payload, headers=headers)
-    return resp
+    response = requests.get(f"{BASE_URL}/vip/catalog", headers=headers)
+    
+    if response.status_code != 200:
+        raise Exception(f"Failed to get VIP catalog: {response.status_code} - {response.text}")
+    
+    return response.json()
 
-def get_availability(token, target_id):
-    """Get target's availability including busy slots"""
+def put_vip_profile(token, profile_data):
+    """Update VIP profile"""
     headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(f"{BASE_URL}/profiles/{target_id}/availability", headers=headers)
-    return resp
+    response = requests.put(f"{BASE_URL}/vip/profile", json=profile_data, headers=headers)
+    return response
 
-def grant_coins_mongodb(user_id, coins):
-    """Directly grant coins to user via MongoDB"""
-    try:
-        client = MongoClient(MONGO_URL)
-        db = client[DB_NAME]
-        result = db.users.update_one(
-            {"id": user_id},
-            {"$set": {"coins": coins}}
-        )
-        client.close()
-        return result.modified_count > 0
-    except Exception as e:
-        print(f"MongoDB error granting coins: {e}")
-        return False
+def get_vip_profile(token, user_id):
+    """Get VIP profile by user ID"""
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.get(f"{BASE_URL}/vip/profile/{user_id}", headers=headers)
+    return response
 
-def main():
-    print_section("3-HOUR DATE SLOT BOOKING TEST")
-    print(f"Base URL: {BASE_URL}")
-    print(f"Test Date: {tomorrow}")
+def upload_vip_photo(token):
+    """Upload a VIP photo"""
+    headers = {"Authorization": f"Bearer {token}"}
     
-    # Setup: Register 3 users
-    print_section("SETUP: Register Users")
+    # Create a minimal valid image file (1x1 PNG)
+    png_data = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
     
-    target_email = f"target_{datetime.now().timestamp()}@test.com"
-    booker1_email = f"booker1_{datetime.now().timestamp()}@test.com"
-    booker2_email = f"booker2_{datetime.now().timestamp()}@test.com"
+    files = {'photo': ('test.png', io.BytesIO(png_data), 'image/png')}
+    response = requests.post(f"{BASE_URL}/vip/photo", files=files, headers=headers)
+    return response
+
+# ============================================================================
+# TEST EXECUTION
+# ============================================================================
+
+print("\n" + "="*80)
+print("VIP PROFILE BEHAVIOR TESTING")
+print("="*80)
+
+try:
+    # ========================================================================
+    # TEST 1: Register a fresh NON-VIP user
+    # ========================================================================
+    print("\n[TEST 1] Registering first NON-VIP user...")
+    user1 = register_user("viptest1")
+    print(f"  User 1 ID: {user1['user_id']}")
+    print(f"  User 1 Email: {user1['email']}")
     
-    target_token, target_id = register_user(target_email, "Target User")
-    if not target_token:
-        print("❌ Failed to register target user")
-        sys.exit(1)
-    print_result("Register Target User", True, f"ID: {target_id}")
-    
-    booker1_token, booker1_id = register_user(booker1_email, "Booker One")
-    if not booker1_token:
-        print("❌ Failed to register booker1")
-        sys.exit(1)
-    print_result("Register Booker 1", True, f"ID: {booker1_id}")
-    
-    booker2_token, booker2_id = register_user(booker2_email, "Booker Two")
-    if not booker2_token:
-        print("❌ Failed to register booker2")
-        sys.exit(1)
-    print_result("Register Booker 2", True, f"ID: {booker2_id}")
-    
-    # Grant coins to bookers via MongoDB
-    print_section("SETUP: Grant Coins via MongoDB")
-    
-    if grant_coins_mongodb(booker1_id, 5000):
-        print_result("Grant coins to Booker 1", True, "5000 coins")
-    else:
-        print_result("Grant coins to Booker 1", False, "MongoDB update failed")
-        sys.exit(1)
-    
-    if grant_coins_mongodb(booker2_id, 5000):
-        print_result("Grant coins to Booker 2", True, "5000 coins")
-    else:
-        print_result("Grant coins to Booker 2", False, "MongoDB update failed")
-        sys.exit(1)
-    
-    # Set target availability
-    print_section("SETUP: Set Target Availability")
-    
-    success, resp = set_availability(
-        target_token,
-        [tomorrow],
-        {"from": "12:00", "to": "21:00"}
+    # Verify user is NOT VIP
+    is_vip = user1['user'].get('vip_until') is not None
+    log_test(
+        "User 1 is NON-VIP",
+        not is_vip,
+        f"vip_until: {user1['user'].get('vip_until')}"
     )
-    if success:
-        print_result("Set availability", True, f"Date: {tomorrow}, Time: 12:00-21:00")
-    else:
-        print_result("Set availability", False, f"Status: {resp.status_code}, Response: {resp.text}")
-        sys.exit(1)
     
-    # Test Scenarios
-    print_section("TEST SCENARIOS")
+    # ========================================================================
+    # TEST 2: Get VIP catalog
+    # ========================================================================
+    print("\n[TEST 2] Getting VIP services catalog...")
+    catalog = get_vip_catalog(user1['token'])
+    services = catalog.get('services', {})
+    places = catalog.get('places', [])
     
-    # Scenario A: Booker1 books at 12:00 (locks 12:00-15:00)
-    print("\n[A] Booker1 books TARGET at 12:00 (should lock 12:00-15:00)")
-    resp_a = book_date(booker1_token, target_id, "12:00", 150)
-    if resp_a.status_code == 200:
-        data = resp_a.json()
-        if data.get("status") == "escrow":
-            print_result("Scenario A", True, f"Booking successful, status: {data['status']}")
-        else:
-            print_result("Scenario A", False, f"Unexpected status: {data.get('status')}")
-    else:
-        print_result("Scenario A", False, f"Status: {resp_a.status_code}, Response: {resp_a.text}")
+    log_test(
+        "VIP catalog retrieved",
+        len(services) > 0 and len(places) > 0,
+        f"Services categories: {len(services)}, Places: {places}"
+    )
     
-    # Scenario B: Try to book overlapping slot at 12:00 (should fail with SLOT_BUSY)
-    print("\n[B] Booker2 tries to book TARGET at 12:00 (overlaps 12:00-15:00, should fail)")
-    resp_b = book_date(booker2_token, target_id, "12:00", 150)
-    if resp_b.status_code == 400:
-        detail = resp_b.json().get("detail", "")
-        if detail.startswith("SLOT_BUSY:"):
-            print_result("Scenario B", True, f"Correctly rejected: {detail}")
-        else:
-            print_result("Scenario B", False, f"Wrong error: {detail}")
-    else:
-        print_result("Scenario B", False, f"Expected 400, got {resp_b.status_code}: {resp_b.text}")
+    # Pick some valid services
+    selected_services = []
+    if 'basic' in services:
+        selected_services.extend(services['basic'][:2])
+    if 'extra' in services:
+        selected_services.extend(services['extra'][:2])
     
-    # Scenario B2: Try to book overlapping slot at 13:00 (should also fail)
-    print("\n[B2] Booker2 tries to book TARGET at 13:00 (overlaps 12:00-15:00, should fail)")
-    resp_b2 = book_date(booker2_token, target_id, "13:00", 150)
-    if resp_b2.status_code == 400:
-        detail = resp_b2.json().get("detail", "")
-        if detail.startswith("SLOT_BUSY:"):
-            print_result("Scenario B2", True, f"Correctly rejected: {detail}")
-        else:
-            print_result("Scenario B2", False, f"Wrong error: {detail}")
-    else:
-        print_result("Scenario B2", False, f"Expected 400, got {resp_b2.status_code}: {resp_b2.text}")
+    print(f"  Selected services: {selected_services}")
     
-    # Scenario C: Booker2 books at 15:00 (non-overlapping, should succeed)
-    print("\n[C] Booker2 books TARGET at 15:00 (non-overlapping 15:00-18:00, should succeed)")
-    resp_c = book_date(booker2_token, target_id, "15:00", 150)
-    if resp_c.status_code == 200:
-        data = resp_c.json()
-        if data.get("status") == "escrow":
-            print_result("Scenario C", True, f"Multiple dates on same day allowed! Status: {data['status']}")
-        else:
-            print_result("Scenario C", False, f"Unexpected status: {data.get('status')}")
-    else:
-        print_result("Scenario C", False, f"Status: {resp_c.status_code}, Response: {resp_c.text}")
+    # ========================================================================
+    # TEST 3: Non-VIP user fills & saves VIP profile (NO price_night field)
+    # ========================================================================
+    print("\n[TEST 3] Non-VIP user saves VIP profile with published=true...")
     
-    # Scenario D: Book at 18:00 (should succeed, 18:00-21:00)
-    print("\n[D] Booker1 books TARGET at 18:00 (non-overlapping 18:00-21:00, should succeed)")
-    resp_d = book_date(booker1_token, target_id, "18:00", 150)
-    if resp_d.status_code == 200:
-        data = resp_d.json()
-        if data.get("status") == "escrow":
-            print_result("Scenario D", True, f"Third booking on same day successful! Status: {data['status']}")
-        else:
-            print_result("Scenario D", False, f"Unexpected status: {data.get('status')}")
-    else:
-        print_result("Scenario D", False, f"Status: {resp_d.status_code}, Response: {resp_d.text}")
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     
-    # Scenario E: Try to book at 20:00 (3h block 20:00-23:00 exceeds window end 21:00)
-    print("\n[E] Booker2 tries to book TARGET at 20:00 (20:00-23:00 exceeds window 21:00, should fail)")
-    resp_e = book_date(booker2_token, target_id, "20:00", 150)
-    if resp_e.status_code == 400:
-        detail = resp_e.json().get("detail", "")
-        if detail.startswith("TIME_UNAVAILABLE:"):
-            print_result("Scenario E", True, f"Correctly rejected: {detail}")
-        else:
-            print_result("Scenario E", False, f"Wrong error: {detail}")
-    else:
-        print_result("Scenario E", False, f"Expected 400, got {resp_e.status_code}: {resp_e.text}")
+    vip_profile_data = {
+        "services": selected_services,
+        "price_hour": 1000,
+        "price_2h": 1800,
+        "price_3h": 2500,
+        # NOTE: NO price_night field - testing that it defaults to 0
+        "places": ["own", "your"],
+        "client_wants": "Respectful and generous clients only",
+        "availability": [
+            {"date": tomorrow, "from": "14:00", "to": "22:00"}
+        ],
+        "published": True  # Non-VIP tries to publish
+    }
     
-    # Scenario F: Get availability and verify busy_slots
-    print("\n[F] GET /api/profiles/{target_id}/availability - verify busy_slots and slot_hours")
-    resp_f = get_availability(booker1_token, target_id)
-    if resp_f.status_code == 200:
-        data = resp_f.json()
-        print(f"    Response: {json.dumps(data, indent=2)}")
+    response = put_vip_profile(user1['token'], vip_profile_data)
+    
+    # Should return 200 (not 403)
+    log_test(
+        "PUT /api/vip/profile returns 200 (not 403 VIP_REQUIRED)",
+        response.status_code == 200,
+        f"Status: {response.status_code}, Response: {response.text[:200]}"
+    )
+    
+    if response.status_code == 200:
+        data = response.json()
         
-        checks = []
+        # Check can_publish is false
+        log_test(
+            "Response includes can_publish=false",
+            data.get('can_publish') == False,
+            f"can_publish: {data.get('can_publish')}"
+        )
         
-        # Check slot_hours = 3
-        if data.get("slot_hours") == 3:
-            checks.append(("slot_hours = 3", True))
-        else:
-            checks.append(("slot_hours = 3", False))
+        # Check vip.published is false (forced off for non-VIP)
+        vip_data = data.get('vip', {})
+        log_test(
+            "vip.published is false (forced off for non-VIP)",
+            vip_data.get('published') == False,
+            f"vip.published: {vip_data.get('published')}"
+        )
         
-        # Check busy_slots exists and has tomorrow's date
-        busy_slots = data.get("busy_slots", {})
-        if tomorrow in busy_slots:
-            slots = busy_slots[tomorrow]
-            checks.append(("busy_slots contains tomorrow", True))
-            
-            # Should have 3 slots: 12:00-15:00, 15:00-18:00, 18:00-21:00
-            expected_slots = [
-                {"from": "12:00", "to": "15:00"},
-                {"from": "15:00", "to": "18:00"},
-                {"from": "18:00", "to": "21:00"}
-            ]
-            
-            if len(slots) == 3:
-                checks.append(("3 busy slots present", True))
-            else:
-                checks.append(("3 busy slots present", False))
-            
-            # Check each expected slot
-            for expected in expected_slots:
-                found = any(s["from"] == expected["from"] and s["to"] == expected["to"] for s in slots)
-                checks.append((f"Slot {expected['from']}-{expected['to']}", found))
-        else:
-            checks.append(("busy_slots contains tomorrow", False))
+        # Check prices.night defaults to 0
+        prices = vip_data.get('prices', {})
+        log_test(
+            "vip.prices.night defaults to 0",
+            prices.get('night') == 0,
+            f"prices: {prices}"
+        )
         
-        # Check that tomorrow IS in busy_days (since all 3 slots are now taken)
-        busy_days = data.get("busy_days", [])
-        if tomorrow in busy_days:
-            checks.append(("Tomorrow in busy_days (all slots taken)", True))
-        else:
-            checks.append(("Tomorrow in busy_days (all slots taken)", False))
+        # Check other prices are set correctly
+        log_test(
+            "vip.prices.hour is 1000",
+            prices.get('hour') == 1000,
+            f"prices.hour: {prices.get('hour')}"
+        )
         
-        all_passed = all(result for _, result in checks)
-        for check_name, result in checks:
-            print_result(f"  {check_name}", result)
+        log_test(
+            "vip.prices.h2 is 1800",
+            prices.get('h2') == 1800,
+            f"prices.h2: {prices.get('h2')}"
+        )
         
-        print_result("Scenario F", all_passed, "Availability endpoint verification")
-    else:
-        print_result("Scenario F", False, f"Status: {resp_f.status_code}, Response: {resp_f.text}")
+        log_test(
+            "vip.prices.h3 is 2500",
+            prices.get('h3') == 2500,
+            f"prices.h3: {prices.get('h3')}"
+        )
+        
+        # Check services are saved
+        log_test(
+            "Services are saved correctly",
+            len(vip_data.get('services', [])) > 0,
+            f"Services count: {len(vip_data.get('services', []))}"
+        )
+        
+        # Check places are saved
+        log_test(
+            "Places are saved correctly",
+            set(vip_data.get('places', [])) == {"own", "your"},
+            f"Places: {vip_data.get('places', [])}"
+        )
+        
+        # Check availability is saved
+        log_test(
+            "Availability is saved correctly",
+            len(vip_data.get('availability', [])) > 0,
+            f"Availability slots: {len(vip_data.get('availability', []))}"
+        )
     
-    # Summary
-    print_section("TEST SUMMARY")
-    print("All test scenarios completed.")
-    print("Review the results above for pass/fail status.")
-    print("\nKey findings:")
-    print("- Multiple 3-hour dates can be booked on the same day (non-overlapping)")
-    print("- Overlapping bookings are correctly rejected with SLOT_BUSY")
-    print("- Time window boundaries are enforced (TIME_UNAVAILABLE)")
-    print("- Availability endpoint returns busy_slots with slot_hours=3")
+    # ========================================================================
+    # TEST 4: Register a SECOND user
+    # ========================================================================
+    print("\n[TEST 4] Registering second user...")
+    user2 = register_user("viptest2")
+    print(f"  User 2 ID: {user2['user_id']}")
+    print(f"  User 2 Email: {user2['email']}")
+    
+    # ========================================================================
+    # TEST 5: Second user tries to view first user's unpublished VIP profile
+    # ========================================================================
+    print("\n[TEST 5] Second user tries to view first user's unpublished VIP profile...")
+    response = get_vip_profile(user2['token'], user1['user_id'])
+    
+    log_test(
+        "GET /api/vip/profile/{uid} returns 404 for unpublished profile (hidden from others)",
+        response.status_code == 404,
+        f"Status: {response.status_code}, Response: {response.text[:200]}"
+    )
+    
+    if response.status_code == 404:
+        log_test(
+            "Error message is 'No VIP profile'",
+            "No VIP profile" in response.text,
+            f"Response: {response.text}"
+        )
+    
+    # ========================================================================
+    # TEST 6: Owner can view their own unpublished VIP profile
+    # ========================================================================
+    print("\n[TEST 6] Owner views their own unpublished VIP profile...")
+    response = get_vip_profile(user1['token'], user1['user_id'])
+    
+    log_test(
+        "Owner GET /api/vip/profile/{ownUserId} returns 200",
+        response.status_code == 200,
+        f"Status: {response.status_code}"
+    )
+    
+    if response.status_code == 200:
+        data = response.json()
+        
+        log_test(
+            "Response includes is_owner=true",
+            data.get('is_owner') == True,
+            f"is_owner: {data.get('is_owner')}"
+        )
+        
+        log_test(
+            "Response includes VIP data",
+            data.get('vip') is not None,
+            f"VIP data present: {data.get('vip') is not None}"
+        )
+        
+        vip_data = data.get('vip', {})
+        log_test(
+            "VIP data shows published=false",
+            vip_data.get('published') == False,
+            f"published: {vip_data.get('published')}"
+        )
+    
+    # ========================================================================
+    # TEST 7: Non-VIP user uploads VIP photo
+    # ========================================================================
+    print("\n[TEST 7] Non-VIP user uploads VIP photo...")
+    response = upload_vip_photo(user1['token'])
+    
+    # Should NOT return 403 VIP_REQUIRED
+    # Any other response (200 success or validation error) is acceptable
+    log_test(
+        "POST /api/vip/photo does NOT return 403 VIP_REQUIRED",
+        response.status_code != 403 or "VIP_REQUIRED" not in response.text,
+        f"Status: {response.status_code}, Response: {response.text[:200]}"
+    )
+    
+    if response.status_code == 200:
+        data = response.json()
+        log_test(
+            "VIP photo uploaded successfully",
+            'photos' in data and len(data['photos']) > 0,
+            f"Photos count: {len(data.get('photos', []))}"
+        )
+    elif response.status_code == 400:
+        # Validation error is acceptable (different from 403 VIP_REQUIRED)
+        print(f"  Note: Got validation error (acceptable): {response.text}")
+    
+except Exception as e:
+    print(f"\n❌ EXCEPTION: {str(e)}")
+    import traceback
+    traceback.print_exc()
+    log_test("Test execution", False, str(e))
 
-if __name__ == "__main__":
-    main()
+# ============================================================================
+# SUMMARY
+# ============================================================================
+
+print("\n" + "="*80)
+print("TEST SUMMARY")
+print("="*80)
+
+passed = sum(1 for t in test_results if t['passed'])
+total = len(test_results)
+
+print(f"\nTotal Tests: {total}")
+print(f"Passed: {passed}")
+print(f"Failed: {total - passed}")
+
+print("\nDetailed Results:")
+for i, test in enumerate(test_results, 1):
+    status = "✅" if test['passed'] else "❌"
+    print(f"{i}. {status} {test['name']}")
+    if not test['passed'] and test['details']:
+        print(f"   {test['details']}")
+
+if passed == total:
+    print("\n🎉 ALL TESTS PASSED!")
+    exit(0)
+else:
+    print(f"\n⚠️  {total - passed} TEST(S) FAILED")
+    exit(1)

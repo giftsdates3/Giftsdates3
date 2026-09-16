@@ -194,6 +194,25 @@ agent_communication:
         -agent: "testing"
         -comment: "All 6 scenarios (A-F) pass. Each date locks a 3h block; overlaps rejected with SLOT_BUSY; non-overlapping same-day slots (12/15/18) all succeed; window boundary enforced (TIME_UNAVAILABLE); availability returns busy_slots + slot_hours=3; day only fully-booked when all slots taken."
 
+  - task: "VIP profile behavior updates (non-VIP can fill/save, publish requires VIP subscription)"
+    implemented: true
+    working: true
+    file: "server.py (PUT /api/vip/profile, GET /api/vip/profile/{uid}, POST /api/vip/photo)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "user"
+        -comment: "Test updated VIP profile behavior: (1) Non-VIP users can now fill & save VIP profile (previously 403), but publishing forced OFF for non-VIP even if they send published=true. (2) Non-VIP can upload VIP photo (previously 403). (3) Unpublished VIP profiles hidden from others (404) but visible to owner. (4) price_night key removal - PUT without price_night should default to 0."
+        -working: true
+        -agent: "testing"
+        -comment: "ALL 20 TESTS PASSED ✅. (1) Non-VIP user successfully saves VIP profile with PUT /api/vip/profile (200, not 403). Response includes can_publish=false, vip.published=false (forced off), prices.night=0 (defaults correctly), prices.hour=1000, h2=1800, h3=2500 all saved correctly. Services, places, availability all saved. (2) Non-VIP user uploads VIP photo via POST /api/vip/photo (200, not 403 VIP_REQUIRED). Photo uploaded successfully. (3) Second user GET /api/vip/profile/{uid} returns 404 'No VIP profile' for unpublished profile (correctly hidden). (4) Owner GET /api/vip/profile/{ownUserId} returns 200 with is_owner=true and full VIP data including published=false. All requirements verified and working correctly."
+
 agent_communication:
     -agent: "main"
     -message: "Added 3-hour slot booking. Backend fully tested (6/6 pass). Frontend: DateBookingModal now shows 3h slot buttons with taken slots disabled; AvailabilityCalendar shows 3h section preview. Awaiting user consent for frontend UI testing."
+    -agent: "user"
+    -message: "Test the updated VIP profile behavior: Non-VIP users can now fill & save VIP profiles (but not publish), upload VIP photos, unpublished profiles hidden from others but visible to owner, price_night defaults to 0 when not provided."
+    -agent: "testing"
+    -message: "VIP profile behavior testing COMPLETE - ALL 20 TESTS PASSED ✅. Tested 4 main scenarios: (1) Non-VIP can save VIP profile with PUT /api/vip/profile - returns 200 (not 403), can_publish=false, published forced to false, price_night defaults to 0, all other prices saved correctly ✅. (2) Non-VIP can upload VIP photo via POST /api/vip/photo - returns 200 (not 403 VIP_REQUIRED), photo uploaded successfully ✅. (3) Unpublished profiles hidden from others - GET by another user returns 404 'No VIP profile' ✅. (4) Owner can view own unpublished profile - GET returns 200 with is_owner=true and full VIP data ✅. All requirements verified and working correctly. No issues found."

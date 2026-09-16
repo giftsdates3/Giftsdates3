@@ -1895,8 +1895,8 @@ async def vip_catalog(user=Depends(get_current_user)):
 
 @api.put("/vip/profile")
 async def put_vip_profile(req: VipProfileReq, user=Depends(get_current_user)):
-    if not is_vip(user):
-        raise HTTPException(403, "VIP_REQUIRED")
+    # Anyone can fill in and save their VIP profile; publishing it requires an active VIP subscription
+    can_publish = is_vip(user)
     services = [s for s in req.services if s in VIP_SERVICE_SET][:80]
     places = [p for p in req.places if p in VIP_PLACES]
     slots = []
@@ -1908,13 +1908,13 @@ async def put_vip_profile(req: VipProfileReq, user=Depends(get_current_user)):
     vip = {"services": services,
            "prices": {"hour": max(0, req.price_hour), "h2": max(0, req.price_2h), "h3": max(0, req.price_3h), "night": max(0, req.price_night)},
            "places": places, "client_wants": (req.client_wants or "").strip()[:1000],
-           "availability": slots, "published": bool(req.published), "updated_at": datetime.now(timezone.utc).isoformat()}
+           "availability": slots, "published": bool(req.published) and can_publish, "updated_at": datetime.now(timezone.utc).isoformat()}
     # preserve previously uploaded photos (managed by separate photo endpoints)
     existing = await db.users.find_one({"id": user["id"]}, {"_id": 0, "vip.photos": 1})
     if existing and existing.get("vip", {}).get("photos"):
         vip["photos"] = existing["vip"]["photos"]
     await db.users.update_one({"id": user["id"]}, {"$set": {"vip": vip}})
-    return {"saved": True, "vip": vip}
+    return {"saved": True, "vip": vip, "can_publish": can_publish}
 
 @api.get("/vip/profile/{uid}")
 async def get_vip_profile(uid: str, user=Depends(get_current_user)):
@@ -1994,8 +1994,7 @@ async def gift_premium(req: GiftPremiumReq, user=Depends(get_current_user)):
 
 @api.post("/vip/photo")
 async def vip_add_photo(photo: UploadFile = File(...), user=Depends(get_current_user)):
-    if not is_vip(user):
-        raise HTTPException(403, "VIP_REQUIRED")
+    # Uploading photos is part of filling in the VIP profile; publishing still requires a subscription
     u = await db.users.find_one({"id": user["id"]}, {"_id": 0, "vip": 1})
     vip = u.get("vip") or {}
     photos = vip.get("photos") or []

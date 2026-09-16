@@ -17,7 +17,7 @@ export default function VipEditor() {
   const isVip = user?.is_vip || (user?.vip_until && new Date(user.vip_until) > new Date());
   const v = user?.vip || {};
   const [services, setServices] = useState(v.services || []);
-  const [prices, setPrices] = useState(v.prices || { hour: "", h2: "", h3: "", night: "" });
+  const [prices, setPrices] = useState(v.prices || { hour: "", h2: "", h3: "" });
   const [places, setPlaces] = useState(v.places || []);
   const [wants, setWants] = useState(v.client_wants || "");
   const [slots, setSlots] = useState(v.availability || []);
@@ -28,7 +28,6 @@ export default function VipEditor() {
   const photoRef = React.useRef(null);
   const goBuyVip = () => { toast.info(t("vip_upsell", lang)); nav("/wallet?vip=1"); };
   const addPhoto = async (e) => {
-    if (!isVip) { goBuyVip(); return; }
     const f = e.target.files?.[0]; if (!f) return;
     if (photos.length >= 12) { toast.error(t("vip_max_photos", lang)); return; }
     const fd = new FormData(); fd.append("photo", f);
@@ -55,13 +54,12 @@ export default function VipEditor() {
     setPublished(val);
   };
   const save = async () => {
-    if (!isVip) { goBuyVip(); return; }
     setBusy(true);
     try {
       await api.put("/vip/profile", {
         services, places, client_wants: wants,
-        price_hour: Number(prices.hour) || 0, price_2h: Number(prices.h2) || 0, price_3h: Number(prices.h3) || 0, price_night: Number(prices.night) || 0,
-        availability: slots, published,
+        price_hour: Number(prices.hour) || 0, price_2h: Number(prices.h2) || 0, price_3h: Number(prices.h3) || 0,
+        availability: slots, published: isVip ? published : false,
       });
       await refreshUser();
       toast.success(t("vip_saved_toast", lang));
